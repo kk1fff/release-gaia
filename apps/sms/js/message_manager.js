@@ -3,10 +3,89 @@
 
 'use strict';
 
+function dumpMmsMessage(msg) {
+  function printIfValid(obj, prop) {
+    if (!obj) return;
+    dump("  " + prop + ": " + obj[prop]);
+  }
+
+  function printArrayIfValid(obj, prop) {
+    if (!obj) return;
+    if (obj[prop] instanceof Array) {
+      var str = '  ' + prop + ': ';
+      for (var i = 0; i < obj[prop].length; i++) {
+        str += obj[prop][i] + ", ";
+      }
+      dump(str);
+    }
+  }
+
+  function printAttachment(att) {
+    printIfValid(att, 'id');
+    printIfValid(att, 'location');
+    dump("  content.size: " + att.content.size);
+    dump("  content.type: " + att.content.type);
+  }
+
+  printIfValid(msg, 'type');
+  printIfValid(msg, 'id');
+  printIfValid(msg, 'state');
+  printIfValid(msg, 'sender');
+  printArrayIfValid(msg, 'receivers');
+  if (msg && msg.attachments) {
+    dump("  Attachments length: " + msg.attachments.length);
+    for (var i  = 0; i < msg.attachments; i++) {
+      dump("Patrick attachment: " + i);
+      printAttachment(msg.attachments[i]);
+    }
+  }
+}
+
 var MessageManager = {
   currentNum: null,
   currentThread: null,
   init: function mm_init(callback) {
+    dump("!!!!! Patrick: hello, messages app !!!!!");
+    var self = this;
+    var mmm = navigator.mozMobileMessage;
+    function retrieveMms(id) {
+      dump("!!!!! Patrick will now retrieve message: " + id + " !!!!!");
+      var req = mmm.retrieveMMS(id);
+      req.onsuccess = function(e) {
+        dump("!!!!! Patrick: Retrieved Mms message:");
+        dumpMmsMessage(e.result);
+      }
+      req.onerror = function(e) {
+        dump("Error occurs when retrieving mms");
+      }
+    }
+
+    var onmms = function(type, e) {
+      dump("!!!!! Patrick: " + type + " !!!!!");
+      dumpMmsMessage(e.message);
+      switch(type) {
+      case 'received':
+        if (this.retrievedMessage.indexOf(e.message.id) == -1) {
+          this.retrievedMessage.push(e.message.id);
+          dump("!!!!! Patrick: Post a task to retrieve message. !!!!!");
+          retrieveMms(e.message.id);
+        } else {
+          dump("!!!!! Patrick: don't retrieve, id = " + e.message.id + ", retrieved = " + JSON.stringify(this.retrievedMessage));
+        }
+        break;
+      }
+    };
+    var regListener = function(type) {
+      mmm.addEventListener(type, onmms.bind(self, type));
+    }
+    dump("!!!!! Patrick add sending event listener !!!!!");
+    regListener('received');
+    regListener('sending');
+    regListener('sent');
+    regListener('failed');
+    regListener('ondeliverysuccess');
+    regListener('ondeliveryerror');
+
     if (this.initialized) {
       return;
     }
@@ -256,16 +335,21 @@ var MessageManager = {
   },
 
   getThreads: function mm_getThreads(callback, extraArg) {
-    var request = this._mozSms.getThreadList();
-    request.onsuccess = function onsuccess(evt) {
-      var threads = evt.target.result;
-      if (callback) {
-        callback(threads, extraArg);
+    var domCursor = navigator.mozSms.getThreads();
+    var threads = [];
+    domCursor.onsuccess = function onsuccess(evt) {
+      var thread = evt.target.result;
+      if (thread) {
+        threads.push(thread);
+        domCursor.continue();
+        return;
       }
+
+      callback(threads, extraArg);
     };
 
-    request.onerror = function onerror() {
-      var msg = 'Reading the database. Error: ' + request.error.name;
+    domCursor.onerror = function onerror() {
+      var msg = 'Reading the database. Error: ' + domCursor.errorCode;
       console.log(msg);
     };
   },
@@ -299,15 +383,37 @@ var MessageManager = {
       console.log(msg);
     };
   },
+
+  retrievedMessage: [],
+
   send: function mm_send(number, text, callback, errorHandler) {
-    var req = this._mozSms.send(number, text);
+    var mmm = navigator.mozMobileMessage;
+    var self = this;
+    var req = mmm.sendMMS({
+      receivers: ["0958028137", "0978239825"],
+      subject: "Test subject",
+      smil: "",
+      attachments: [
+        {
+          "id": "id1",
+          "location": "taipei office",
+          "content": new Blob(["1234"], {type: "text/plain"})
+        }, {
+          "id": "id2",
+          "location": " taipei, taiwan",
+          "content": new Blob(["abcd"], {type: "text/plain"})
+        }
+      ]
+    });
     req.onsuccess = function onsuccess(e) {
-      callback && callback(req.result);
+      dumpMmsMessage(e.result);
     };
 
     req.onerror = function onerror(e) {
-      errorHandler && errorHandler(number);
+      dump("Error: " + e);
     };
+
+
   },
 
   deleteMessage: function mm_deleteMessage(id, callback) {
